@@ -16,7 +16,7 @@ import { TenantContextService } from '../../core/tenant-context/tenant-context.s
 import { AuditLogService } from '../audit-log/audit-log.service.js';
 import { PERMISSIONS } from '../roles/constants/permissions.constant.js';
 import { AssignRoleDto } from './dto/assign-role.dto.js';
-import { TenantUser } from './entities/tenant-user.entity.js';
+import type { TenantUser } from '../../database/schema/index.js';
 import { TenantUsersService } from './users.service.js';
 
 @ApiTags('users')
@@ -33,13 +33,13 @@ export class UsersController {
   @Get()
   @Permissions(PERMISSIONS.USERS_READ)
   findAll(): Promise<TenantUser[]> {
-    return this.usersService.findAll(this.tenantContext.getManager());
+    return this.usersService.findAll(this.tenantContext.getDb());
   }
 
   @Get(':id')
   @Permissions(PERMISSIONS.USERS_READ)
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<TenantUser> {
-    return this.usersService.findById(this.tenantContext.getManager(), id);
+    return this.usersService.findById(this.tenantContext.getDb(), id);
   }
 
   @Post(':id/roles')
@@ -49,9 +49,9 @@ export class UsersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AssignRoleDto,
   ): Promise<{ success: true }> {
-    const manager = this.tenantContext.getManager();
-    await this.usersService.assignRole(manager, id, dto.roleId);
-    await this.auditLogService.record(manager, {
+    const db = this.tenantContext.getDb();
+    await this.usersService.assignRole(db, id, dto.roleId);
+    await this.auditLogService.record(db, {
       actorUserId: currentUser.sub,
       action: 'user.role_assigned',
       entityType: 'tenant_user',

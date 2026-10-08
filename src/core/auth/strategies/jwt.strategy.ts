@@ -1,19 +1,20 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
 import { PassportStrategy } from '@nestjs/passport';
+import { eq } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { readFileSync } from 'node:fs';
-import { Repository } from 'typeorm';
 import { jwtConfig } from '../../../config/configuration.js';
 import type { JwtPayload } from '../../../common/types/jwt-payload.interface.js';
-import { User } from '../entities/user.entity.js';
-import { UserStatus } from '../entities/user-status.enum.js';
+import { DRIZZLE_DB } from '../../../database/drizzle.constants.js';
+import { users, UserStatus } from '../../../database/schema/index.js';
+import * as schema from '../../../database/schema/index.js';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    @Inject(DRIZZLE_DB) private readonly db: NodePgDatabase<typeof schema>,
     @Inject(jwtConfig.KEY) config: ConfigType<typeof jwtConfig>,
   ) {
     super({
@@ -33,9 +34,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * tokens (small cost: one indexed PK lookup on `public.users`).
    */
   async validate(payload: JwtPayload): Promise<JwtPayload> {
-    const user = await this.userRepository.findOne({
-      where: { id: payload.sub },
-    });
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, payload.sub))
+      .limit(1);
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('User not found or disabled');
     }

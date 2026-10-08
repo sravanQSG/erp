@@ -1,25 +1,31 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Tenant } from './entities/tenant.entity.js';
+import { desc, eq } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { DRIZZLE_DB } from '../../database/drizzle.constants.js';
+import { tenants, type Tenant } from '../../database/schema/index.js';
+import * as schema from '../../database/schema/index.js';
 
 @Injectable()
 export class TenantsService {
   constructor(
-    @InjectRepository(Tenant)
-    private readonly tenantRepository: Repository<Tenant>,
+    @Inject(DRIZZLE_DB) private readonly db: NodePgDatabase<typeof schema>,
   ) {}
 
   async findAll(): Promise<Tenant[]> {
-    return this.tenantRepository.find({ order: { createdAt: 'DESC' } });
+    return this.db.select().from(tenants).orderBy(desc(tenants.createdAt));
   }
 
   async findById(id: string): Promise<Tenant> {
-    const tenant = await this.tenantRepository.findOne({ where: { id } });
+    const [tenant] = await this.db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.id, id))
+      .limit(1);
     if (!tenant) {
       throw new NotFoundException(`Tenant ${id} not found`);
     }
@@ -27,7 +33,12 @@ export class TenantsService {
   }
 
   async findBySlug(slug: string): Promise<Tenant | null> {
-    return this.tenantRepository.findOne({ where: { slug } });
+    const [tenant] = await this.db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.slug, slug))
+      .limit(1);
+    return tenant ?? null;
   }
 
   async assertSlugAvailable(slug: string): Promise<void> {

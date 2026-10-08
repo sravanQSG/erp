@@ -16,7 +16,7 @@ import { TenantContextService } from '../../core/tenant-context/tenant-context.s
 import { AuditLogService } from '../audit-log/audit-log.service.js';
 import { PERMISSIONS } from './constants/permissions.constant.js';
 import { CreateRoleDto } from './dto/create-role.dto.js';
-import { Role } from './entities/role.entity.js';
+import type { Role } from '../../database/schema/index.js';
 import { RolesService } from './roles.service.js';
 
 @ApiTags('roles')
@@ -33,13 +33,13 @@ export class RolesController {
   @Get()
   @Permissions(PERMISSIONS.ROLES_READ)
   findAll(): Promise<Role[]> {
-    return this.rolesService.findAll(this.tenantContext.getManager());
+    return this.rolesService.findAll(this.tenantContext.getDb());
   }
 
   @Get(':id')
   @Permissions(PERMISSIONS.ROLES_READ)
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<Role> {
-    return this.rolesService.findById(this.tenantContext.getManager(), id);
+    return this.rolesService.findById(this.tenantContext.getDb(), id);
   }
 
   @Post()
@@ -48,9 +48,9 @@ export class RolesController {
     @CurrentUser() currentUser: AuthenticatedUser,
     @Body() dto: CreateRoleDto,
   ): Promise<Role> {
-    const manager = this.tenantContext.getManager();
-    const role = await this.rolesService.createRole(manager, dto);
-    await this.auditLogService.record(manager, {
+    const db = this.tenantContext.getDb();
+    const role = await this.rolesService.createRole(db, dto);
+    await this.auditLogService.record(db, {
       actorUserId: currentUser.sub,
       action: 'role.created',
       entityType: 'role',

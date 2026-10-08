@@ -7,7 +7,9 @@ import { TenantContextService } from './tenant-context.service.js';
 
 /**
  * Global module providing tenant-aware database access. Exported services
- * can be injected anywhere without re-importing this module.
+ * can be injected anywhere without re-importing this module. Relies on
+ * `DatabaseModule` (also `@Global()`) being instantiated somewhere in the
+ * graph (it's imported in AppModule) to provide `DRIZZLE_POOL`.
  */
 @Global()
 @Module({

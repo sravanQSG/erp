@@ -1,11 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import { DRIZZLE_DB, DRIZZLE_POOL } from '../../database/drizzle.constants.js';
+import { tenants, TenantStatus, type Tenant } from '../../database/schema/index.js';
+import * as schema from '../../database/schema/index.js';
 import { tenantMigrations } from '../../database/tenant-migrations/index.js';
 import { RolesService } from '../../modules/roles/roles.service.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
-import { Tenant } from './entities/tenant.entity.js';
-import { TenantStatus } from './entities/tenant-status.enum.js';
 import { TenantsService } from './tenants.service.js';
 
 const SCHEMA_PREFIX = 'tenant_';
@@ -15,9 +17,8 @@ export class TenantProvisioningService {
   private readonly logger = new Logger(TenantProvisioningService.name);
 
   constructor(
-    @InjectDataSource() private readonly dataSource: DataSource,
-    @InjectRepository(Tenant)
-    private readonly tenantRepository: Repository<Tenant>,
+    @Inject(DRIZZLE_POOL) private readonly pool: Pool,
+    @Inject(DRIZZLE_DB) private readonly db: NodePgDatabase<typeof schema>,
     private readonly tenantsService: TenantsService,
     private readonly rolesService: RolesService,
   ) {}
@@ -33,32 +34,38 @@ export class TenantProvisioningService {
     await this.tenantsService.assertSlugAvailable(dto.slug);
     const schemaName = `${SCHEMA_PREFIX}${dto.slug}`;
 
-    const tenant = this.tenantRepository.create({
-      name: dto.name,
-      slug: dto.slug,
-      schemaName,
-      status: TenantStatus.PENDING,
-    });
-    await this.tenantRepository.save(tenant);
+    const [tenant] = await this.db
+      .insert(tenants)
+      .values({
+        name: dto.name,
+        slug: dto.slug,
+        schemaName,
+        status: TenantStatus.PENDING,
+      })
+      .returning();
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
+    const client = await this.pool.connect();
     try {
-      await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
-      await queryRunner.query(`SET search_path TO "${schemaName}", public`);
+      await client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
+      await client.query(`SET search_path TO "${schemaName}", public`);
 
-      for (const Migration of tenantMigrations) {
-        const migration = new Migration();
+      for (const migration of tenantMigrations) {
         this.logger.log(
           `Applying tenant migration ${migration.name} to schema ${schemaName}`,
         );
-        await migration.up(queryRunner);
+        await migration.up(client);
       }
 
-      await this.rolesService.seedDefaultRoles(queryRunner.manager);
+      const tenantDb = drizzle(client, { schema });
+      await this.rolesService.seedDefaultRoles(tenantDb);
 
-      tenant.status = TenantStatus.ACTIVE;
-      await this.tenantRepository.save(tenant);
+      const [activated] = await this.db
+        .update(tenants)
+        .set({ status: TenantStatus.ACTIVE })
+        .where(eq(tenants.id, tenant.id))
+        .returning();
+
+      return activated;
     } catch (error) {
       this.logger.error(
         `Failed to provision tenant schema ${schemaName}`,
@@ -69,10 +76,8 @@ export class TenantProvisioningService {
       // Defense in depth: this connection returns to the shared pool, so
       // reset its session search_path rather than leaving it pointed at a
       // tenant schema for whoever acquires it next.
-      await queryRunner.query('SET search_path TO "$user", public');
-      await queryRunner.release();
+      await client.query('SET search_path TO "$user", public');
+      client.release();
     }
-
-    return tenant;
   }
 }

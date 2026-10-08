@@ -1,12 +1,12 @@
-import type { MigrationInterface, QueryRunner } from 'typeorm';
+import type { PoolClient } from 'pg';
 
 /** Creates the tenant-scoped audit_logs table. See InitialTenantSchema for
  *  the search_path-based schema resolution this relies on. */
-export class CreateAuditLogsTable1733600001000 implements MigrationInterface {
-  name = 'CreateAuditLogsTable1733600001000';
+export const createAuditLogsTable = {
+  name: 'CreateAuditLogsTable1733600001000',
 
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
+  async up(client: PoolClient): Promise<void> {
+    await client.query(`
       CREATE TABLE "audit_logs" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         "actor_user_id" uuid,
@@ -17,12 +17,12 @@ export class CreateAuditLogsTable1733600001000 implements MigrationInterface {
         "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
-    await queryRunner.query(
+    await client.query(
       `CREATE INDEX "idx_audit_logs_created_at" ON "audit_logs" ("created_at")`,
     );
-  }
+  },
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE IF EXISTS "audit_logs"`);
-  }
-}
+  async down(client: PoolClient): Promise<void> {
+    await client.query(`DROP TABLE IF EXISTS "audit_logs"`);
+  },
+};

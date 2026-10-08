@@ -1,9 +1,19 @@
-import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, QueryRunner } from 'typeorm';
+import { Inject, Injectable } from '@nestjs/common';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { Pool, type PoolClient } from 'pg';
+import { DRIZZLE_POOL } from '../../database/drizzle.constants.js';
+import * as schema from '../../database/schema/index.js';
 
 /** Only lowercase letters, digits and underscores, starting with a letter. */
 const SAFE_SCHEMA_NAME = /^[a-z][a-z0-9_]*$/;
+
+export interface TenantConnection {
+  /** The checked-out pool client — release it back via `release()`. */
+  client: PoolClient;
+  /** Drizzle instance bound to that same client, so queries run on the
+   *  connection whose session has `search_path` pinned to the tenant. */
+  db: NodePgDatabase<typeof schema>;
+}
 
 /**
  * Low-level primitive for acquiring a Postgres connection pinned (via
@@ -15,38 +25,38 @@ const SAFE_SCHEMA_NAME = /^[a-z][a-z0-9_]*$/;
  */
 @Injectable()
 export class TenantConnectionService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(@Inject(DRIZZLE_POOL) private readonly pool: Pool) {}
 
-  async acquire(schemaName: string): Promise<QueryRunner> {
+  async acquire(schemaName: string): Promise<TenantConnection> {
     if (!SAFE_SCHEMA_NAME.test(schemaName)) {
       throw new Error(`Refusing to use unsafe schema name: "${schemaName}"`);
     }
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.query(`SET search_path TO "${schemaName}", public`);
-    return queryRunner;
+    const client = await this.pool.connect();
+    await client.query(`SET search_path TO "${schemaName}", public`);
+    const db = drizzle(client, { schema });
+    return { client, db };
   }
 
-  async release(queryRunner: QueryRunner): Promise<void> {
+  async release(connection: TenantConnection): Promise<void> {
     try {
       // Reset before returning to the shared pool so a future borrower
       // never inherits a stale tenant search_path.
-      await queryRunner.query('SET search_path TO "$user", public');
+      await connection.client.query('SET search_path TO "$user", public');
     } finally {
-      await queryRunner.release();
+      connection.client.release();
     }
   }
 
   /** One-off helper for code paths outside the HTTP request pipeline. */
   async runInTenantSchema<T>(
     schemaName: string,
-    fn: (queryRunner: QueryRunner) => Promise<T>,
+    fn: (db: NodePgDatabase<typeof schema>) => Promise<T>,
   ): Promise<T> {
-    const queryRunner = await this.acquire(schemaName);
+    const connection = await this.acquire(schemaName);
     try {
-      return await fn(queryRunner);
+      return await fn(connection.db);
     } finally {
-      await this.release(queryRunner);
+      await this.release(connection);
     }
   }
 }

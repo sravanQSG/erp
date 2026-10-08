@@ -1,52 +1,50 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { EntityManager } from 'typeorm';
-import { In } from 'typeorm';
+import { asc, eq, inArray } from 'drizzle-orm';
+import type { DrizzleDb } from '../../database/drizzle-db.type.js';
+import { roles, rolePermissions, type Role } from '../../database/schema/index.js';
 import {
   ALL_PERMISSION_KEYS,
   DEFAULT_ROLE_SEEDS,
   type PermissionKey,
 } from './constants/permissions.constant.js';
 import { CreateRoleDto } from './dto/create-role.dto.js';
-import { RolePermission } from './entities/role-permission.entity.js';
-import { Role } from './entities/role.entity.js';
 
 /**
- * Tenant-scoped role management. Every method takes the active tenant
- * `EntityManager` explicitly (obtained from `TenantContextService.getManager()`
- * for normal requests, or from `TenantConnectionService.runInTenantSchema()`
- * for one-off pre-auth access such as login) rather than using
- * `@InjectRepository()`, since the correct schema is only known per-request.
+ * Tenant-scoped role management. Every method takes the active tenant `db`
+ * explicitly (obtained from `TenantContextService.getDb()` for normal
+ * requests, or from `TenantConnectionService.runInTenantSchema()` for
+ * one-off pre-auth access such as login) rather than a module-level
+ * injected instance, since the correct schema is only known per-request.
  */
 @Injectable()
 export class RolesService {
-  async findAll(manager: EntityManager): Promise<Role[]> {
-    return manager.getRepository(Role).find({ order: { name: 'ASC' } });
+  async findAll(db: DrizzleDb): Promise<Role[]> {
+    return db.select().from(roles).orderBy(asc(roles.name));
   }
 
-  async findById(manager: EntityManager, id: string): Promise<Role> {
-    const role = await manager.getRepository(Role).findOne({ where: { id } });
+  async findById(db: DrizzleDb, id: string): Promise<Role> {
+    const [role] = await db.select().from(roles).where(eq(roles.id, id)).limit(1);
     if (!role) {
       throw new NotFoundException(`Role ${id} not found`);
     }
     return role;
   }
 
-  async createRole(manager: EntityManager, dto: CreateRoleDto): Promise<Role> {
-    const existing = await manager
-      .getRepository(Role)
-      .findOne({ where: { name: dto.name } });
+  async createRole(db: DrizzleDb, dto: CreateRoleDto): Promise<Role> {
+    const [existing] = await db
+      .select()
+      .from(roles)
+      .where(eq(roles.name, dto.name))
+      .limit(1);
     if (existing) {
       throw new ConflictException(`Role "${dto.name}" already exists`);
     }
 
-    return manager.transaction(async (trx) => {
-      const role = await trx.getRepository(Role).save(
-        trx.getRepository(Role).create({
-          name: dto.name,
-          description: dto.description ?? null,
-          isSystem: false,
-        }),
-      );
+    return db.transaction(async (trx) => {
+      const [role] = await trx
+        .insert(roles)
+        .values({ name: dto.name, description: dto.description ?? null, isSystem: false })
+        .returning();
       if (dto.permissions?.length) {
         await this.assignPermissions(trx, role.id, dto.permissions);
       }
@@ -55,47 +53,50 @@ export class RolesService {
   }
 
   async assignPermissions(
-    manager: EntityManager,
+    db: DrizzleDb,
     roleId: string,
     permissionKeys: PermissionKey[],
   ): Promise<void> {
-    const repo = manager.getRepository(RolePermission);
-    const rows = permissionKeys.map((permissionKey) =>
-      repo.create({ roleId, permissionKey }),
-    );
-    // name/permission pairs are unique-indexed; upsert avoids duplicate errors.
-    await repo.upsert(rows, ['roleId', 'permissionKey']);
+    if (permissionKeys.length === 0) {
+      return;
+    }
+    await db
+      .insert(rolePermissions)
+      .values(permissionKeys.map((permissionKey) => ({ roleId, permissionKey })))
+      // roleId/permissionKey pairs are unique-indexed; do-nothing avoids
+      // duplicate-key errors on re-assignment (same semantics as the
+      // previous TypeORM `repo.upsert(..., ['roleId','permissionKey'])`).
+      .onConflictDoNothing({
+        target: [rolePermissions.roleId, rolePermissions.permissionKey],
+      });
   }
 
   async getPermissionKeysForRoles(
-    manager: EntityManager,
+    db: DrizzleDb,
     roleIds: string[],
   ): Promise<PermissionKey[]> {
     if (roleIds.length === 0) {
       return [];
     }
-    const rows = await manager
-      .getRepository(RolePermission)
-      .find({ where: { roleId: In(roleIds) } });
-    return [...new Set(rows.map((row) => row.permissionKey))];
+    const rows = await db
+      .select()
+      .from(rolePermissions)
+      .where(inArray(rolePermissions.roleId, roleIds));
+    return [...new Set(rows.map((row) => row.permissionKey as PermissionKey))];
   }
 
   /** Idempotently seeds the default `admin`/`member` roles for a new tenant. */
-  async seedDefaultRoles(manager: EntityManager): Promise<void> {
-    const roleRepo = manager.getRepository(Role);
+  async seedDefaultRoles(db: DrizzleDb): Promise<void> {
     for (const seed of DEFAULT_ROLE_SEEDS) {
-      let role = await roleRepo.findOne({ where: { name: seed.name } });
+      let [role] = await db.select().from(roles).where(eq(roles.name, seed.name)).limit(1);
       if (!role) {
-        role = await roleRepo.save(
-          roleRepo.create({
-            name: seed.name,
-            description: seed.description,
-            isSystem: seed.isSystem,
-          }),
-        );
+        [role] = await db
+          .insert(roles)
+          .values({ name: seed.name, description: seed.description, isSystem: seed.isSystem })
+          .returning();
       }
       await this.assignPermissions(
-        manager,
+        db,
         role.id,
         seed.permissions ?? (ALL_PERMISSION_KEYS as PermissionKey[]),
       );

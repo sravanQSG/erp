@@ -11,7 +11,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
-import { Tenant } from './entities/tenant.entity.js';
+import type { Tenant } from '../../database/schema/index.js';
 import { TenantProvisioningService } from './tenant-provisioning.service.js';
 import { TenantsService } from './tenants.service.js';
 

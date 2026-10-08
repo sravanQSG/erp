@@ -1,11 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { EntityManager } from 'typeorm';
-import { In } from 'typeorm';
-import { Role } from '../roles/entities/role.entity.js';
+import { eq, inArray } from 'drizzle-orm';
+import type { DrizzleDb } from '../../database/drizzle-db.type.js';
+import {
+  roles,
+  tenantUsers,
+  userRoles,
+  TenantUserStatus,
+  type TenantUser,
+} from '../../database/schema/index.js';
 import { RolesService } from '../roles/roles.service.js';
-import { TenantUserStatus } from './entities/tenant-user-status.enum.js';
-import { TenantUser } from './entities/tenant-user.entity.js';
-import { UserRole } from './entities/user-role.entity.js';
 
 export interface TenantUserAccess {
   roleNames: string[];
@@ -14,84 +17,82 @@ export interface TenantUserAccess {
 
 /**
  * Tenant-scoped user-profile management. Like `RolesService`, every method
- * takes the active tenant `EntityManager` explicitly — see that file for
- * why `@InjectRepository()` isn't used here.
+ * takes the active tenant `db` explicitly — see that file for why.
  */
 @Injectable()
 export class TenantUsersService {
   constructor(private readonly rolesService: RolesService) {}
 
   async createProfile(
-    manager: EntityManager,
+    db: DrizzleDb,
     globalUserId: string,
     displayName: string,
   ): Promise<TenantUser> {
-    const repo = manager.getRepository(TenantUser);
-    return repo.save(
-      repo.create({
-        globalUserId,
-        displayName,
-        status: TenantUserStatus.ACTIVE,
-      }),
-    );
+    const [profile] = await db
+      .insert(tenantUsers)
+      .values({ globalUserId, displayName, status: TenantUserStatus.ACTIVE })
+      .returning();
+    return profile;
   }
 
   async findByGlobalUserId(
-    manager: EntityManager,
+    db: DrizzleDb,
     globalUserId: string,
   ): Promise<TenantUser | null> {
-    return manager.getRepository(TenantUser).findOne({ where: { globalUserId } });
+    const [user] = await db
+      .select()
+      .from(tenantUsers)
+      .where(eq(tenantUsers.globalUserId, globalUserId))
+      .limit(1);
+    return user ?? null;
   }
 
-  async findById(manager: EntityManager, id: string): Promise<TenantUser> {
-    const user = await manager.getRepository(TenantUser).findOne({ where: { id } });
+  async findById(db: DrizzleDb, id: string): Promise<TenantUser> {
+    const [user] = await db
+      .select()
+      .from(tenantUsers)
+      .where(eq(tenantUsers.id, id))
+      .limit(1);
     if (!user) {
       throw new NotFoundException(`User ${id} not found`);
     }
     return user;
   }
 
-  async findAll(manager: EntityManager): Promise<TenantUser[]> {
-    return manager.getRepository(TenantUser).find({ order: { createdAt: 'DESC' } });
+  async findAll(db: DrizzleDb): Promise<TenantUser[]> {
+    return db.select().from(tenantUsers).orderBy(tenantUsers.createdAt);
   }
 
-  async assignRole(
-    manager: EntityManager,
-    tenantUserId: string,
-    roleId: string,
-  ): Promise<void> {
-    const repo = manager.getRepository(UserRole);
-    await repo.upsert(
-      repo.create({ tenantUserId, roleId }),
-      ['tenantUserId', 'roleId'],
-    );
+  async assignRole(db: DrizzleDb, tenantUserId: string, roleId: string): Promise<void> {
+    await db
+      .insert(userRoles)
+      .values({ tenantUserId, roleId })
+      .onConflictDoNothing({ target: [userRoles.tenantUserId, userRoles.roleId] });
   }
 
   /** Roles + de-duplicated permission keys for a tenant user, used by
    *  AuthService to build JWT claims at login. */
   async getAccessForGlobalUser(
-    manager: EntityManager,
+    db: DrizzleDb,
     globalUserId: string,
   ): Promise<TenantUserAccess> {
-    const tenantUser = await this.findByGlobalUserId(manager, globalUserId);
+    const tenantUser = await this.findByGlobalUserId(db, globalUserId);
     if (!tenantUser) {
       return { roleNames: [], permissions: [] };
     }
 
-    const userRoles = await manager
-      .getRepository(UserRole)
-      .find({ where: { tenantUserId: tenantUser.id } });
-    const roleIds = userRoles.map((userRole) => userRole.roleId);
+    const assignedRoles = await db
+      .select()
+      .from(userRoles)
+      .where(eq(userRoles.tenantUserId, tenantUser.id));
+    const roleIds = assignedRoles.map((userRole) => userRole.roleId);
     if (roleIds.length === 0) {
       return { roleNames: [], permissions: [] };
     }
 
-    const roles = await manager.getRepository(Role).find({ where: { id: In(roleIds) } });
-    const permissions = await this.rolesService.getPermissionKeysForRoles(
-      manager,
-      roleIds,
-    );
+    const roleRows = await db.select().from(roles).where(inArray(roles.id, roleIds));
+    const permissions = await this.rolesService.getPermissionKeysForRoles(db, roleIds);
 
-    return { roleNames: roles.map((role) => role.name), permissions };
+    return { roleNames: roleRows.map((role) => role.name), permissions };
   }
 }

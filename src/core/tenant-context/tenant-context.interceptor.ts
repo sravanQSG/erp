@@ -47,21 +47,22 @@ export class TenantContextInterceptor implements NestInterceptor {
       this.cls.run(() => {
         this.tenantConnection
           .acquire(schemaName)
-          .then((queryRunner) => {
+          .then((connection) => {
             this.cls.set('tenantId', user.tenantId);
             this.cls.set('schemaName', user.schemaName);
-            this.cls.set('queryRunner', queryRunner);
+            this.cls.set('client', connection.client);
+            this.cls.set('db', connection.db);
 
             next.handle().subscribe({
               next: (value) => subscriber.next(value),
               error: (err: unknown) => {
                 void this.tenantConnection
-                  .release(queryRunner)
+                  .release(connection)
                   .finally(() => subscriber.error(err));
               },
               complete: () => {
                 void this.tenantConnection
-                  .release(queryRunner)
+                  .release(connection)
                   .finally(() => subscriber.complete());
               },
             });

@@ -6,16 +6,24 @@ import {
 } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
+import { eq, inArray } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import ms from 'ms';
-import { In, Repository } from 'typeorm';
 import { jwtConfig } from '../../config/configuration.js';
 import type { JwtPayload } from '../../common/types/jwt-payload.interface.js';
+import { DRIZZLE_DB } from '../../database/drizzle.constants.js';
+import {
+  refreshTokens,
+  roles,
+  users,
+  UserStatus,
+  type User,
+} from '../../database/schema/index.js';
+import * as schema from '../../database/schema/index.js';
 import { AuditLogService } from '../../modules/audit-log/audit-log.service.js';
 import { TenantConnectionService } from '../tenant-context/tenant-connection.service.js';
 import { TenantsService } from '../tenants/tenants.service.js';
-import { Role } from '../../modules/roles/entities/role.entity.js';
 import {
   TenantUserAccess,
   TenantUsersService,
@@ -23,9 +31,6 @@ import {
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
-import { RefreshToken } from './entities/refresh-token.entity.js';
-import { User } from './entities/user.entity.js';
-import { UserStatus } from './entities/user-status.enum.js';
 import { hashPassword, verifyPassword } from './password.util.js';
 
 export interface TokenPair {
@@ -38,9 +43,7 @@ const PLATFORM_ADMIN_ROLE = 'platform_admin';
 @Injectable()
 export class AuthService {
   constructor(
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
-    @InjectRepository(RefreshToken)
-    private readonly refreshTokenRepository: Repository<RefreshToken>,
+    @Inject(DRIZZLE_DB) private readonly db: NodePgDatabase<typeof schema>,
     private readonly jwtService: JwtService,
     @Inject(jwtConfig.KEY) private readonly jwtCfg: ConfigType<typeof jwtConfig>,
     private readonly tenantsService: TenantsService,
@@ -50,9 +53,11 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto): Promise<TokenPair> {
-    const user = await this.userRepository.findOne({
-      where: { email: dto.email },
-    });
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.email, dto.email))
+      .limit(1);
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -67,20 +72,26 @@ export class AuthService {
 
   async refresh(dto: RefreshTokenDto): Promise<TokenPair> {
     const tokenHash = this.hashToken(dto.refreshToken);
-    const existing = await this.refreshTokenRepository.findOne({
-      where: { tokenHash },
-    });
+    const [existing] = await this.db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.tokenHash, tokenHash))
+      .limit(1);
     if (!existing || existing.revokedAt || existing.expiresAt < new Date()) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
     // Rotate: the presented token is single-use.
-    existing.revokedAt = new Date();
-    await this.refreshTokenRepository.save(existing);
+    await this.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(refreshTokens.id, existing.id));
 
-    const user = await this.userRepository.findOne({
-      where: { id: existing.userId },
-    });
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, existing.userId))
+      .limit(1);
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -91,10 +102,10 @@ export class AuthService {
 
   async logout(dto: RefreshTokenDto): Promise<void> {
     const tokenHash = this.hashToken(dto.refreshToken);
-    await this.refreshTokenRepository.update(
-      { tokenHash },
-      { revokedAt: new Date() },
-    );
+    await this.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(refreshTokens.tokenHash, tokenHash));
   }
 
   /**
@@ -108,38 +119,42 @@ export class AuthService {
     dto: CreateUserDto,
     actorUserId: string,
   ): Promise<{ userId: string }> {
-    const existing = await this.userRepository.findOne({
-      where: { email: dto.email },
-    });
+    const [existing] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.email, dto.email))
+      .limit(1);
     if (existing) {
       throw new ConflictException(`Email "${dto.email}" is already registered`);
     }
 
     const tenant = await this.tenantsService.findById(tenantId);
     const passwordHash = await hashPassword(dto.password);
-    const user = await this.userRepository.save(
-      this.userRepository.create({
+    const [user] = await this.db
+      .insert(users)
+      .values({
         email: dto.email,
         passwordHash,
         tenantId: tenant.id,
         status: UserStatus.ACTIVE,
-      }),
-    );
+      })
+      .returning();
 
     const roleNames = dto.roleNames?.length ? dto.roleNames : ['member'];
-    await this.tenantConnection.runInTenantSchema(tenant.schemaName, async (qr) => {
+    await this.tenantConnection.runInTenantSchema(tenant.schemaName, async (tenantDb) => {
       const profile = await this.tenantUsersService.createProfile(
-        qr.manager,
+        tenantDb,
         user.id,
         dto.displayName,
       );
-      const roles = await qr.manager
-        .getRepository(Role)
-        .find({ where: { name: In(roleNames) } });
-      for (const role of roles) {
-        await this.tenantUsersService.assignRole(qr.manager, profile.id, role.id);
+      const roleRows = await tenantDb
+        .select()
+        .from(roles)
+        .where(inArray(roles.name, roleNames));
+      for (const role of roleRows) {
+        await this.tenantUsersService.assignRole(tenantDb, profile.id, role.id);
       }
-      await this.auditLogService.record(qr.manager, {
+      await this.auditLogService.record(tenantDb, {
         actorUserId,
         action: 'user.created',
         entityType: 'tenant_user',
@@ -161,7 +176,7 @@ export class AuthService {
     const tenant = await this.tenantsService.findById(user.tenantId);
     const access = await this.tenantConnection.runInTenantSchema(
       tenant.schemaName,
-      (qr) => this.tenantUsersService.getAccessForGlobalUser(qr.manager, user.id),
+      (tenantDb) => this.tenantUsersService.getAccessForGlobalUser(tenantDb, user.id),
     );
     return { schemaName: tenant.schemaName, access };
   }
@@ -171,7 +186,7 @@ export class AuthService {
     schemaName: string | null,
     access: TenantUserAccess,
   ): Promise<TokenPair> {
-    const roles = user.isPlatformAdmin
+    const userRoles = user.isPlatformAdmin
       ? [...access.roleNames, PLATFORM_ADMIN_ROLE]
       : access.roleNames;
 
@@ -183,7 +198,7 @@ export class AuthService {
       tenantId: user.tenantId,
       schemaName,
       email: user.email,
-      roles,
+      roles: userRoles,
       permissions: access.permissions,
       tokenVersion: user.tokenVersion,
     };
@@ -200,9 +215,7 @@ export class AuthService {
       Date.now() + ms(this.jwtCfg.refreshTokenTtl as ms.StringValue),
     );
 
-    await this.refreshTokenRepository.save(
-      this.refreshTokenRepository.create({ userId, tokenHash, expiresAt }),
-    );
+    await this.db.insert(refreshTokens).values({ userId, tokenHash, expiresAt });
     return rawToken;
   }
 

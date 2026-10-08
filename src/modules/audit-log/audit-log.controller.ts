@@ -5,7 +5,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard.js';
 import { TenantContextService } from '../../core/tenant-context/tenant-context.service.js';
 import { PERMISSIONS } from '../roles/constants/permissions.constant.js';
 import { AuditLogService } from './audit-log.service.js';
-import { AuditLog } from './entities/audit-log.entity.js';
+import type { AuditLog } from '../../database/schema/index.js';
 
 @ApiTags('audit-log')
 @ApiBearerAuth()
@@ -20,6 +20,6 @@ export class AuditLogController {
   @Get()
   @Permissions(PERMISSIONS.AUDIT_LOG_READ)
   findRecent(): Promise<AuditLog[]> {
-    return this.auditLogService.findRecent(this.tenantContext.getManager());
+    return this.auditLogService.findRecent(this.tenantContext.getDb());
   }
 }
