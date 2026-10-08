@@ -54,6 +54,14 @@ pnpm dev:api    # NestJS backend, watch mode — http://localhost:3001
 pnpm dev:web    # Vite dev server — http://localhost:3000
 ```
 
+> **Run these from the repo root**, not from inside `apps/api`/`apps/web`.
+> `start:dev` (and other per-package scripts like `test:e2e`) are defined
+> in `apps/api/package.json`, not the root `package.json` — running
+> `pnpm run start:dev` directly from the root fails with
+> `ERR_PNPM_NO_SCRIPT`. Either use the root `dev:api`/`dev:web` scripts
+> above, `cd apps/api && pnpm run start:dev`, or
+> `pnpm --filter @demo-erp/api start:dev` from the root.
+
 The backend's `CORS_ORIGIN` (`apps/api/.env`) must match the frontend's dev
 origin (`http://localhost:3000` by default) for browser requests to
 succeed.
