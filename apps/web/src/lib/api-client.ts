@@ -1,6 +1,6 @@
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './auth';
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3000';
+const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';
 
 export class ApiError extends Error {
   readonly status: number;

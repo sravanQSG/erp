@@ -23,15 +23,15 @@ From the monorepo root:
 
 ```bash
 pnpm install
-pnpm dev:web      # http://localhost:5173
+pnpm dev:web      # http://localhost:3000
 ```
 
 Requires the backend running too (`pnpm dev:api`, defaults to
-`http://localhost:3000`) — see [apps/api/README.md](../api/README.md). Set
+`http://localhost:3001`) — see [apps/api/README.md](../api/README.md). Set
 `VITE_API_URL` if the API isn't on the default URL.
 
 Also make sure the backend's `CORS_ORIGIN` (`apps/api/.env`) matches this
-app's dev origin (`http://localhost:5173`).
+app's dev origin (`http://localhost:3000`).
 
 ## Auth model
 

@@ -50,17 +50,17 @@ first platform admin.
 ### Running both apps
 
 ```bash
-pnpm dev:api    # NestJS backend, watch mode — http://localhost:3000
-pnpm dev:web    # Vite dev server — http://localhost:5173
+pnpm dev:api    # NestJS backend, watch mode — http://localhost:3001
+pnpm dev:web    # Vite dev server — http://localhost:3000
 ```
 
 The backend's `CORS_ORIGIN` (`apps/api/.env`) must match the frontend's dev
-origin (`http://localhost:5173` by default) for browser requests to
+origin (`http://localhost:3000` by default) for browser requests to
 succeed.
 
-- API: `http://localhost:3000`
-- Swagger docs: `http://localhost:3000/api/docs`
-- Frontend: `http://localhost:5173`
+- API: `http://localhost:3001`
+- Swagger docs: `http://localhost:3001/api/docs`
+- Frontend: `http://localhost:3000`
 
 ## Root scripts
 

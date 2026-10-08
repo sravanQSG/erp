@@ -117,8 +117,8 @@ instance, since the correct schema is only known per-request.
    pnpm run build
    pnpm run start:prod   # or: pnpm run start:dev for a watch-mode dev loop
    ```
-   The API listens on `http://localhost:3000` by default; Swagger docs are
-   at `http://localhost:3000/api/docs`.
+   The API listens on `http://localhost:3001` by default (set via `PORT` in
+   `.env`); Swagger docs are at `http://localhost:3001/api/docs`.
 
 ## Typical flow once running
 
