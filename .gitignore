@@ -3,6 +3,7 @@ dist/
 coverage/
 *.log
 npm-debug.log*
+*.tsbuildinfo
 
 # Environment files
 .env
