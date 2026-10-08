@@ -62,6 +62,33 @@ succeed.
 - Swagger docs: `http://localhost:3001/api/docs`
 - Frontend: `http://localhost:3000`
 
+## Local dev credentials
+
+> ⚠️ **Local development only.** These are seeded/reset values for the
+> `erp_dev` database on this machine — never use these values, or commit
+> real credentials, for a shared/production environment.
+
+**Database** (`apps/api/.env`):
+
+| | |
+|---|---|
+| Host / port | `localhost:5432` |
+| Database | `erp_dev` |
+| User | `erp_app` |
+| Password | `erp_app_dev_pw` |
+
+**Login accounts** (`POST /auth/login` via the UI or API):
+
+| Email | Password | Role |
+|---|---|---|
+| `admin@platform.local` | `DevPassword123!` | Platform admin (manages tenants) |
+| `owner@globex.com` | `DevPassword123!` | Tenant admin — Globex Corp (`tenant_globex`) |
+
+Other seeded tenant users (`owner@acme.com`, `owner@beta.com`,
+`staffer@acme.com`) exist in the dev database but keep whatever password
+they were created with locally — reset them the same way if needed (see
+[apps/api/README.md](apps/api/README.md#resetting-a-local-password)).
+
 ## Root scripts
 
 These fan out to every workspace package via `pnpm -r` (recursive), or

@@ -163,6 +163,28 @@ NODE_ENV=test pnpm run db:migrate   # once, against erp_test
 pnpm run test:e2e
 ```
 
+## Resetting a local password
+
+Passwords are hashed (Argon2id, `src/core/auth/password.util.ts`) — there's
+no way to recover a forgotten one, only reset it. There's deliberately no
+HTTP endpoint for this (same reasoning as platform-admin seeding). For
+local dev, update `password_hash` directly against `public.users` using
+the same hashing function the app uses:
+
+```bash
+node -e "
+const { Client } = require('pg');
+const { hash } = require('@node-rs/argon2');
+(async () => {
+  const client = new Client({ host: 'localhost', port: 5432, user: 'erp_app', password: 'erp_app_dev_pw', database: 'erp_dev' });
+  await client.connect();
+  const newHash = await hash('<new-password>');
+  await client.query('UPDATE users SET password_hash = \$1 WHERE email = \$2', [newHash, '<email>']);
+  await client.end();
+})();
+"
+```
+
 ## Project layout
 
 ```
