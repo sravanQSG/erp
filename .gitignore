@@ -1,0 +1,23 @@
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+# JWT keys (generate locally with `npm run keys:generate`)
+keys/*.pem
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.vitest-cache/
