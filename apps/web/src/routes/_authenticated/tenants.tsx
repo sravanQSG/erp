@@ -30,14 +30,6 @@ export const Route = createFileRoute('/_authenticated/tenants')({
 
 const createTenantSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
-  slug: z
-    .string()
-    .min(2)
-    .max(48)
-    .regex(
-      /^[a-z][a-z0-9_]*$/,
-      'Lowercase letters, digits, and underscores only; must start with a letter',
-    ),
 });
 type CreateTenantValues = z.infer<typeof createTenantSchema>;
 
@@ -151,15 +143,6 @@ function TenantsPage() {
               {createForm.formState.errors.name && (
                 <p className="text-destructive text-sm">
                   {createForm.formState.errors.name.message}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="tenant-slug">Slug</Label>
-              <Input id="tenant-slug" placeholder="acme" {...createForm.register('slug')} />
-              {createForm.formState.errors.slug && (
-                <p className="text-destructive text-sm">
-                  {createForm.formState.errors.slug.message}
                 </p>
               )}
             </div>

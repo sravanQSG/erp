@@ -9,6 +9,9 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { DRIZZLE_DB } from '../../database/drizzle.constants.js';
 import { tenants, type Tenant } from '../../database/schema/index.js';
 import * as schema from '../../database/schema/index.js';
+import { slugify, withSlugSuffix } from './slug.util.js';
+
+const MAX_SLUG_ATTEMPTS = 50;
 
 @Injectable()
 export class TenantsService {
@@ -46,5 +49,29 @@ export class TenantsService {
     if (existing) {
       throw new ConflictException(`Tenant slug "${slug}" is already taken`);
     }
+  }
+
+  /**
+   * Derives a Postgres-schema-safe slug from the tenant's display name and
+   * disambiguates it against existing tenants (appending `_2`, `_3`, ... on
+   * collision) so callers never have to pick a schema-safe identifier by
+   * hand.
+   */
+  async generateUniqueSlug(name: string): Promise<string> {
+    const base = slugify(name);
+    if (!(await this.findBySlug(base))) {
+      return base;
+    }
+
+    for (let attempt = 2; attempt <= MAX_SLUG_ATTEMPTS; attempt++) {
+      const candidate = withSlugSuffix(base, attempt);
+      if (!(await this.findBySlug(candidate))) {
+        return candidate;
+      }
+    }
+
+    throw new ConflictException(
+      `Could not derive a unique slug for tenant name "${name}" after ${MAX_SLUG_ATTEMPTS} attempts`,
+    );
   }
 }

@@ -25,20 +25,20 @@ export class TenantProvisioningService {
 
   /**
    * Creates the tenant record, provisions its dedicated Postgres schema, and
-   * applies all tenant-schema migrations. `dto.slug` is already strictly
-   * validated (`[a-z][a-z0-9_]*`) by CreateTenantDto, which is what makes it
-   * safe to interpolate into the `CREATE SCHEMA`/`SET search_path` DDL below
-   * (Postgres cannot parameterize identifiers).
+   * applies all tenant-schema migrations. The schema-safe slug is derived
+   * from `dto.name` (see `TenantsService.generateUniqueSlug`/`slugify`),
+   * which is what makes it safe to interpolate into the `CREATE SCHEMA`/
+   * `SET search_path` DDL below (Postgres cannot parameterize identifiers).
    */
   async provision(dto: CreateTenantDto): Promise<Tenant> {
-    await this.tenantsService.assertSlugAvailable(dto.slug);
-    const schemaName = `${SCHEMA_PREFIX}${dto.slug}`;
+    const slug = await this.tenantsService.generateUniqueSlug(dto.name);
+    const schemaName = `${SCHEMA_PREFIX}${slug}`;
 
     const [tenant] = await this.db
       .insert(tenants)
       .values({
         name: dto.name,
-        slug: dto.slug,
+        slug,
         schemaName,
         status: TenantStatus.PENDING,
       })

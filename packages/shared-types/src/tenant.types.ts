@@ -7,7 +7,6 @@ export type TenantStatusValue = (typeof TenantStatus)[keyof typeof TenantStatus]
 
 export interface CreateTenantRequest {
   name: string;
-  slug: string;
 }
 
 export interface TenantResponse {

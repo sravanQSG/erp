@@ -123,13 +123,23 @@ instance, since the correct schema is only known per-request.
 ## Typical flow once running
 
 1. `POST /auth/login` as the platform admin seeded above.
-2. `POST /tenants` (platform admin only) to provision a new tenant — this
-   creates its Postgres schema, runs tenant-schema migrations, and seeds
-   default `admin`/`member` roles.
+2. `POST /tenants {"name": "Acme Corporation"}` (platform admin only) to
+   provision a new tenant — the server derives a unique, schema-safe slug
+   from `name` (see "Tenant slugs" below), creates its Postgres schema,
+   runs tenant-schema migrations, and seeds default `admin`/`member` roles.
 3. `POST /auth/tenants/:tenantId/admin-user` (platform admin only) to
    bootstrap that tenant's first admin user.
 4. From then on, that tenant admin can `POST /auth/users` to invite more
    users into their own tenant, `POST /roles` to add custom roles, etc.
+
+### Tenant slugs
+
+`CreateTenantDto` only takes `name` — there's no separate slug input.
+`TenantsService.generateUniqueSlug` (`src/core/tenants/slug.util.ts`)
+derives one automatically: lowercases, strips accents, replaces runs of
+non-alphanumerics with `_`, and disambiguates collisions by appending
+`_2`, `_3`, etc. The result becomes the tenant's `slug` column and the
+`tenant_<slug>` Postgres schema name.
 
 ## Scripts
 
